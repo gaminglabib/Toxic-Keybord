@@ -1,0 +1,23 @@
+<resources>
+    <string name="app_name">TOXIC KEYBOARD STUDIO</string>
+    <string name="ime_service_label">TOXIC Keyboard</string>
+    <string name="subtype_en_us">English (US) - QWERTY</string>
+    <string name="subtype_bn_bd">বাংলা (Bengali) - Unicode</string>
+    <string name="dashboard_title">TOXIC KEYBOARD STUDIO</string>
+    <string name="dashboard_subtitle">Custom Theme &amp; Input Engine • Android 9+ Ready</string>
+    <string name="status_enabled">Enabled in System</string>
+    <string name="status_disabled">Not Enabled</string>
+    <string name="status_selected">Active Default Keyboard</string>
+    <string name="status_not_selected">Not Selected as Default</string>
+    <string name="action_enable_keyboard">1. Enable Keyboard</string>
+    <string name="action_select_keyboard">2. Select Default Keyboard</string>
+    <string name="action_refresh_status">Refresh Status</string>
+    <string name="nav_home">Dashboard</string>
+    <string name="nav_theme_studio">Theme Studio</string>
+    <string name="nav_text_studio">Text Studio</string>
+    <string name="nav_layout_studio">Layout</string>
+    <string name="nav_my_themes">My Themes</string>
+    <string name="nav_settings">Settings</string>
+    <string name="privacy_notice_title">Zero-Telemetry Local Privacy Guarantee</string>
+    <string name="privacy_notice_body">TOXIC KEYBOARD STUDIO operates 100% offline with zero network permissions. Keystrokes, passwords, and clipboard items are never logged remotely or transmitted off your device.</string>
+</resources>

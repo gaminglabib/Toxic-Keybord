@@ -1,0 +1,6 @@
+{
+  "name": "TOXIC KEYBOARD STUDIO",
+  "description": "Custom keyboard theme studio, text style designer, and native English/Bengali Android InputMethodService keyboard engine.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
