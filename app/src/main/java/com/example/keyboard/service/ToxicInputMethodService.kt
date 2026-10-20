@@ -12,11 +12,15 @@ import com.example.R
 import com.example.keyboard.actions.KeyboardActionHandler
 import com.example.keyboard.layout.KeyActionType
 import com.example.keyboard.layout.KeySpec
+import com.example.keyboard.phonetic.BanglaPhoneticEngine
 import com.example.keyboard.state.EditorFieldContext
 import com.example.keyboard.state.KeyboardEngineState
 import com.example.keyboard.state.KeyboardLanguage
 import com.example.keyboard.state.KeyboardMode
 import com.example.keyboard.ui.NativeKeyboardRendererView
+import com.example.keyboard.voice.VoiceInputListener
+import com.example.keyboard.voice.VoiceInputManager
+import com.example.keyboard.voice.VoiceInputState
 import com.example.theme.storage.ActiveKeyboardBridge
 import com.example.theme.storage.ThemeRepository
 import kotlinx.coroutines.CoroutineScope
@@ -27,10 +31,13 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
- * Real Android system InputMethodService for TOXIC KEYBOARD STUDIO.
- * Dynamically shares the active KeyboardTheme and GlobalKeyboardSettings with the Studio app,
- * works completely independently of MainActivity, and forces input view display across
- * Android 9+ devices and emulators.
+ * Modern Android system InputMethodService for TOXIC KEYBOARD STUDIO.
+ * Features:
+ * - Real-time English-to-Bangla phonetic transliteration (e.g. "ami" -> "আমি", "bangla" -> "বাংলা")
+ * - Voice-to-Text with SpeechRecognizer (English & Bengali)
+ * - Shared Theme and Settings synchronization with Studio app
+ * - Categorized Emoji picker and rich Clipboard integration
+ * - Safe cursor handling and sensitive-field protection
  */
 class ToxicInputMethodService : InputMethodService(), NativeKeyboardRendererView.Listener {
 
@@ -70,7 +77,6 @@ class ToxicInputMethodService : InputMethodService(), NativeKeyboardRendererView
         } catch (_: Exception) {
         }
 
-        // Prime initial language immediately from synchronous settings cache
         val initialSettings = ActiveKeyboardBridge.globalSettings.value
         engineState = engineState.copy(
             language = if (initialSettings.defaultLanguage == "bn") {
@@ -96,7 +102,7 @@ class ToxicInputMethodService : InputMethodService(), NativeKeyboardRendererView
         }
 
         serviceScope.launch {
-            ActiveKeyboardBridge.globalSettings.collectLatest { settings ->
+            ActiveKeyboardBridge.globalSettings.collectLatest {
                 syncView()
             }
         }
@@ -115,19 +121,11 @@ class ToxicInputMethodService : InputMethodService(), NativeKeyboardRendererView
         }
     }
 
-    /**
-     * Critical for emulators and Android 9+ OEM devices:
-     * Always evaluate input view as shown so Android creates and displays the soft keyboard
-     * whenever any text field is focused, even if a virtual/hardware keyboard is reported.
-     */
     override fun onEvaluateInputViewShown(): Boolean {
         super.onEvaluateInputViewShown()
         return true
     }
 
-    /**
-     * Never cover the underlying application with an opaque fullscreen extract editor.
-     */
     override fun onEvaluateFullscreenMode(): Boolean {
         return false
     }
@@ -178,7 +176,6 @@ class ToxicInputMethodService : InputMethodService(), NativeKeyboardRendererView
         ensureRepositoryInitialized()
         applyEditorInfoToState(info)
 
-        // Synchronously read latest saved theme & settings so keyboard is always up-to-date on frame 1
         val latestSettings = repository.readSettingsFromPrefs()
         val latestTheme = repository.readActiveThemeSynchronously()
         ActiveKeyboardBridge.publishSettings(latestSettings)
@@ -207,13 +204,15 @@ class ToxicInputMethodService : InputMethodService(), NativeKeyboardRendererView
         engineState = engineState.copy(
             editorContext = fieldContext,
             mode = targetMode,
-            composingWord = ""
+            composingWord = "",
+            voiceState = VoiceInputState.IDLE
         )
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
         try {
+            VoiceInputManager.cancel()
             currentInputConnection?.finishComposingText()
         } catch (_: Exception) {
         }
@@ -221,6 +220,7 @@ class ToxicInputMethodService : InputMethodService(), NativeKeyboardRendererView
 
     override fun onDestroy() {
         try {
+            VoiceInputManager.cancel()
             clipboardManager?.removePrimaryClipChangedListener(clipListener)
         } catch (_: Exception) {
         }
@@ -271,14 +271,32 @@ class ToxicInputMethodService : InputMethodService(), NativeKeyboardRendererView
 
             KeyActionType.SPACE -> {
                 val lastWord = KeyboardActionHandler.extractCurrentWordPrefix(ic)
-                KeyboardActionHandler.commitTextSafe(ic, " ")
-                if (lastWord.length >= 2) {
+                val isAscii = lastWord.isNotEmpty() && lastWord.all { it in 'a'..'z' || it in 'A'..'Z' }
+                val shouldPhoneticCommit = (engineState.language == KeyboardLanguage.BENGALI || engineState.isPhoneticMode) &&
+                    isAscii &&
+                    engineState.suggestions.isNotEmpty() &&
+                    engineState.suggestions.first() != lastWord
+
+                if (shouldPhoneticCommit) {
+                    val topSuggestion = engineState.suggestions.first()
+                    KeyboardActionHandler.commitSuggestion(ic, lastWord, topSuggestion)
                     serviceScope.launch {
                         repository.learnWordIfAllowed(
-                            word = lastWord,
-                            lang = engineState.language.code,
+                            word = topSuggestion,
+                            lang = "bn",
                             isSensitiveField = engineState.editorContext.isPasswordOrSensitive
                         )
+                    }
+                } else {
+                    KeyboardActionHandler.commitTextSafe(ic, " ")
+                    if (lastWord.length >= 2) {
+                        serviceScope.launch {
+                            repository.learnWordIfAllowed(
+                                word = lastWord,
+                                lang = engineState.language.code,
+                                isSensitiveField = engineState.editorContext.isPasswordOrSensitive
+                            )
+                        }
                     }
                 }
                 refreshSuggestionsAsync()
@@ -327,6 +345,11 @@ class ToxicInputMethodService : InputMethodService(), NativeKeyboardRendererView
                 }
                 engineState = engineState.onModeChanged(nextMode)
             }
+
+            KeyActionType.VOICE_TYPING -> {
+                onVoiceTypingRequested()
+                return
+            }
         }
         syncView()
     }
@@ -367,6 +390,87 @@ class ToxicInputMethodService : InputMethodService(), NativeKeyboardRendererView
         syncView()
     }
 
+    override fun onEmojiCategorySelected(index: Int) {
+        engineState = engineState.copy(selectedEmojiCategoryIndex = index)
+        syncView()
+    }
+
+    override fun onClipboardClearRequested() {
+        serviceScope.launch {
+            repository.clearAllClipboard()
+            recentClips = emptyList()
+            syncView()
+        }
+    }
+
+    override fun onVoiceTypingRequested() {
+        if (VoiceInputManager.isListening()) {
+            VoiceInputManager.stopListening()
+            engineState = engineState.copy(voiceState = VoiceInputState.PROCESSING, voiceMessage = "Processing speech...")
+            syncView()
+            return
+        }
+
+        if (!VoiceInputManager.hasMicrophonePermission(this)) {
+            // Launch MainActivity to guide user to grant permission
+            try {
+                val intent = Intent(this, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    putExtra("LAUNCH_TAB", "settings")
+                }
+                startActivity(intent)
+            } catch (_: Exception) {
+            }
+            engineState = engineState.copy(
+                voiceState = VoiceInputState.ERROR,
+                voiceMessage = "Microphone permission required. Tap Settings."
+            )
+            syncView()
+            return
+        }
+
+        val lang = if (engineState.language == KeyboardLanguage.BENGALI) "bn" else "en"
+        VoiceInputManager.startListening(
+            context = this,
+            languageCode = lang,
+            listener = object : VoiceInputListener {
+                override fun onStateChanged(state: VoiceInputState, message: String) {
+                    engineState = engineState.copy(voiceState = state, voiceMessage = message)
+                    syncView()
+                }
+
+                override fun onRmsChanged(rmsdB: Float) {
+                    engineState = engineState.copy(voiceRms = rmsdB)
+                    syncView()
+                }
+
+                override fun onSpeechResult(text: String) {
+                    KeyboardActionHandler.commitTextSafe(currentInputConnection, "$text ")
+                    engineState = engineState.copy(voiceState = VoiceInputState.IDLE, voiceMessage = "")
+                    syncView()
+                }
+
+                override fun onError(errorMessage: String) {
+                    engineState = engineState.copy(voiceState = VoiceInputState.ERROR, voiceMessage = errorMessage)
+                    syncView()
+                    serviceScope.launch {
+                        kotlinx.coroutines.delay(2200L)
+                        if (engineState.voiceState == VoiceInputState.ERROR) {
+                            engineState = engineState.copy(voiceState = VoiceInputState.IDLE, voiceMessage = "")
+                            syncView()
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    override fun onVoiceCancelRequested() {
+        VoiceInputManager.cancel()
+        engineState = engineState.copy(voiceState = VoiceInputState.IDLE, voiceMessage = "")
+        syncView()
+    }
+
     override fun onOpenStudioAppRequested() {
         try {
             val intent = Intent(this, MainActivity::class.java).apply {
@@ -377,6 +481,12 @@ class ToxicInputMethodService : InputMethodService(), NativeKeyboardRendererView
         }
     }
 
+    /**
+     * Refreshes suggestions with real-time English-to-Bangla phonetic transliteration:
+     * e.g., typing "ami" -> suggestions contain "আমি", "ami"
+     * typing "bangla" -> suggestions contain "বাংলা", "bangla"
+     * typing "kemon" -> suggestions contain "কেমন"
+     */
     private fun refreshSuggestionsAsync() {
         if (engineState.editorContext.isPasswordOrSensitive) {
             engineState = engineState.copy(composingWord = "", suggestions = emptyList())
@@ -384,9 +494,45 @@ class ToxicInputMethodService : InputMethodService(), NativeKeyboardRendererView
             return
         }
         val prefix = KeyboardActionHandler.extractCurrentWordPrefix(currentInputConnection)
+        if (prefix.isBlank()) {
+            val defaultWords = if (engineState.language == KeyboardLanguage.BENGALI) {
+                listOf("বাংলা", "ধন্যবাদ", "ভালো")
+            } else {
+                listOf("the", "and", "you")
+            }
+            engineState = engineState.copy(composingWord = "", suggestions = defaultWords)
+            syncView()
+            return
+        }
+
         serviceScope.launch {
-            val list = repository.querySuggestions(engineState.language.code, prefix)
-            engineState = engineState.copy(composingWord = prefix, suggestions = list)
+            val suggestions = mutableListOf<String>()
+            val isAsciiPrefix = prefix.all { it in 'a'..'z' || it in 'A'..'Z' }
+
+            val phoneticAllowed = engineState.isPhoneticMode &&
+                ActiveKeyboardBridge.globalSettings.value.enablePhoneticTransliteration
+
+            if (isAsciiPrefix) {
+                val transliterated = BanglaPhoneticEngine.transliterateWord(prefix)
+                if (engineState.language == KeyboardLanguage.BENGALI || phoneticAllowed) {
+                    suggestions.addAll(transliterated)
+                } else {
+                    val dbMatches = repository.querySuggestions("en", prefix)
+                    suggestions.addAll(dbMatches)
+                }
+            } else {
+                val dbMatches = repository.querySuggestions(engineState.language.code, prefix)
+                suggestions.addAll(dbMatches)
+            }
+
+            if (!suggestions.contains(prefix)) {
+                suggestions.add(prefix)
+            }
+
+            engineState = engineState.copy(
+                composingWord = prefix,
+                suggestions = suggestions.distinct().take(3)
+            )
             syncView()
         }
     }

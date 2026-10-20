@@ -16,7 +16,8 @@ enum class KeyActionType {
     MODE_SYMBOLS_2,
     MODE_ALPHABET,
     LANGUAGE_SWITCH,
-    EMOJI_PANEL_TOGGLE
+    EMOJI_PANEL_TOGGLE,
+    VOICE_TYPING
 }
 
 data class KeySpec(

@@ -199,6 +199,14 @@ fun SettingsAndPrivacyScreen(
                 )
 
                 SettingsSwitchRow(
+                    title = "Bangla Phonetic (Avro Style) Transliteration",
+                    subtitle = "Typing English letters (e.g. 'ami', 'bangla', 'kemon') suggests and completes authentic Bengali ('আমি', 'বাংলা', 'কেমন')",
+                    checked = globalSettings.enablePhoneticTransliteration,
+                    testTag = "settings_toggle_phonetic",
+                    onCheckedChange = { c -> onUpdateGlobalSettings { it.copy(enablePhoneticTransliteration = c) } }
+                )
+
+                SettingsSwitchRow(
                     title = "Learn Typed Words Locally",
                     subtitle = "Saves non-sensitive words to your local Room database dictionary",
                     checked = globalSettings.enablePersonalDictionaryLearning,

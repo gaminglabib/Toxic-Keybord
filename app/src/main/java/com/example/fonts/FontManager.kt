@@ -24,12 +24,14 @@ data class ImportedFontInfo(
 
 object FontManager {
 
-    private const val MAX_FONT_SIZE_BYTES = 8L * 1024L * 1024L // 8 MB max safety limit
+    // Raised limit to 100 MB to safely accommodate large full-Unicode and multi-weight TTF/OTF fonts
+    private const val MAX_FONT_SIZE_BYTES = 100L * 1024L * 1024L
     private val typefaceCache = mutableMapOf<String, Typeface>()
 
     /**
      * Validates a .ttf or .otf file from SAF Uri using magic header bytes and Android Typeface parser,
      * then copies it into app-private storage (filesDir/fonts).
+     * Supports large files (up to 100 MB) via buffered streaming to prevent OutOfMemory errors.
      */
     fun importCustomFont(
         context: Context,
@@ -45,6 +47,7 @@ object FontManager {
 
             val ext = when {
                 cleanName.endsWith(".otf", ignoreCase = true) -> ".otf"
+                cleanName.endsWith(".ttf", ignoreCase = true) -> ".ttf"
                 else -> ".ttf"
             }
             val fontId = "custom_${System.currentTimeMillis()}"
@@ -53,14 +56,14 @@ object FontManager {
             var totalBytes = 0L
             context.contentResolver.openInputStream(uri)?.use { input ->
                 FileOutputStream(targetFile).use { output ->
-                    val buffer = ByteArray(8192)
+                    val buffer = ByteArray(32768)
                     var read: Int
                     while (input.read(buffer).also { read = it } != -1) {
                         totalBytes += read
                         if (totalBytes > MAX_FONT_SIZE_BYTES) {
                             targetFile.delete()
                             return Result.failure(
-                                IllegalArgumentException("Font file exceeds 8 MB limit.")
+                                IllegalArgumentException("Font file exceeds maximum 100 MB limit.")
                             )
                         }
                         output.write(buffer, 0, read)
@@ -83,7 +86,7 @@ object FontManager {
                 return Result.failure(IllegalArgumentException("Corrupt or unsupported font file."))
             }
 
-            if (testTypeface == null || testTypeface == Typeface.DEFAULT) {
+            if (testTypeface == null) {
                 targetFile.delete()
                 return Result.failure(IllegalArgumentException("Android could not load this font file."))
             }
@@ -109,7 +112,7 @@ object FontManager {
     }
 
     /**
-     * Checks TrueType (00 01 00 00 or 'true') and OpenType ('OTTO') magic headers.
+     * Checks TrueType (00 01 00 00, 'true', 'typ1'), OpenType ('OTTO'), and collections ('ttcf') magic headers.
      */
     fun isValidFontHeader(file: File): Boolean {
         if (!file.exists() || file.length() < 12) return false
@@ -124,9 +127,11 @@ object FontManager {
             val b3 = header[3].toInt() and 0xFF
 
             val isTtf = (b0 == 0x00 && b1 == 0x01 && b2 == 0x00 && b3 == 0x00) ||
-                (b0 == 't'.code && b1 == 'r'.code && b2 == 'u'.code && b3 == 'e'.code)
+                (b0 == 't'.code && b1 == 'r'.code && b2 == 'u'.code && b3 == 'e'.code) ||
+                (b0 == 't'.code && b1 == 'y'.code && b2 == 'p'.code && b3 == '1'.code)
             val isOtf = (b0 == 'O'.code && b1 == 'T'.code && b2 == 'T'.code && b3 == 'O'.code)
-            isTtf || isOtf
+            val isTtc = (b0 == 't'.code && b1 == 't'.code && b2 == 'c'.code && b3 == 'f'.code)
+            isTtf || isOtf || isTtc
         } catch (_: Exception) {
             false
         }
@@ -134,8 +139,8 @@ object FontManager {
 
     /**
      * Resolves an Android native Typeface for Canvas / InputMethodService rendering.
-     * Automatically falls back to system Sanskrit/Bengali-capable Sans-Serif when rendering
-     * Bengali Unicode text so Latin-only custom fonts never break Bengali conjuncts.
+     * Prioritizes custom fonts (including imported Bengali fonts like Kalpurush or SolaimanLipi),
+     * and falls back to system Sans-Serif if needed.
      */
     fun resolveTypeface(
         context: Context,
@@ -147,10 +152,6 @@ object FontManager {
             textStyle.fontWeight >= 700 -> Typeface.BOLD
             textStyle.isItalic -> Typeface.ITALIC
             else -> Typeface.NORMAL
-        }
-
-        if (isBengaliScript) {
-            return Typeface.create(Typeface.SANS_SERIF, styleInt)
         }
 
         val customPath = textStyle.customFontPath
@@ -171,6 +172,10 @@ object FontManager {
                     // Safe fallback below
                 }
             }
+        }
+
+        if (isBengaliScript) {
+            return Typeface.create(Typeface.SANS_SERIF, styleInt)
         }
 
         val baseTypeface = when (textStyle.fontFamilyId) {
@@ -200,6 +205,17 @@ object FontManager {
             else -> FontWeight.Normal
         }
         val style = if (textStyle.isItalic) FontStyle.Italic else FontStyle.Normal
+
+        val customPath = textStyle.customFontPath
+        if (!customPath.isNullOrBlank()) {
+            val file = File(customPath)
+            if (file.exists() && file.canRead()) {
+                try {
+                    return FontFamily(Font(file, weight, style))
+                } catch (_: Exception) {
+                }
+            }
+        }
 
         return when (textStyle.fontFamilyId) {
             BuiltInFontFamily.SERIF.id -> FontFamily.Serif

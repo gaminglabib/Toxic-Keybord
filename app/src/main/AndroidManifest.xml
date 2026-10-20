@@ -5,6 +5,9 @@
     <!-- Normal install-time permission for optional keypress haptic vibration -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Dangerous runtime permission for voice-to-text typing via SpeechRecognizer -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"

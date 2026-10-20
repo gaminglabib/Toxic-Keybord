@@ -29,6 +29,7 @@ data class GlobalKeyboardSettings(
     val activeThemeId: String = DefaultThemes.TOXIC_EMERALD_CORE.id,
     val defaultLanguage: String = "en", // "en" or "bn"
     val enableSuggestions: Boolean = true,
+    val enablePhoneticTransliteration: Boolean = true,
     val enablePersonalDictionaryLearning: Boolean = true,
     val enableClipboardHistory: Boolean = false, // Opt-in for privacy
     val highContrastOverride: Boolean = false,
@@ -37,7 +38,10 @@ data class GlobalKeyboardSettings(
     val globalSoundEnabled: Boolean = false,
     val globalVibrationEnabled: Boolean = true,
     val globalVibrationStrengthMs: Int = 18
-)
+) {
+    val vibrationFeedback: Boolean get() = globalVibrationEnabled
+    val soundFeedback: Boolean get() = globalSoundEnabled
+}
 
 /**
  * Process-wide live state holder that bridges the Studio UI and ToxicInputMethodService
@@ -214,6 +218,7 @@ class ThemeRepository(context: Context) {
                     ?: DefaultThemes.TOXIC_EMERALD_CORE.id,
                 defaultLanguage = p.getString("default_language", "en") ?: "en",
                 enableSuggestions = p.getBoolean("enable_suggestions", true),
+                enablePhoneticTransliteration = p.getBoolean("enable_phonetic", true),
                 enablePersonalDictionaryLearning = p.getBoolean("enable_dict_learning", true),
                 enableClipboardHistory = p.getBoolean("enable_clipboard", false),
                 highContrastOverride = p.getBoolean("high_contrast_override", false),
@@ -237,6 +242,7 @@ class ThemeRepository(context: Context) {
                     ?.putString("active_theme_id", updated.activeThemeId)
                     ?.putString("default_language", updated.defaultLanguage)
                     ?.putBoolean("enable_suggestions", updated.enableSuggestions)
+                    ?.putBoolean("enable_phonetic", updated.enablePhoneticTransliteration)
                     ?.putBoolean("enable_dict_learning", updated.enablePersonalDictionaryLearning)
                     ?.putBoolean("enable_clipboard", updated.enableClipboardHistory)
                     ?.putBoolean("high_contrast_override", updated.highContrastOverride)
@@ -444,6 +450,8 @@ class ThemeRepository(context: Context) {
         } catch (_: Exception) {
         }
     }
+
+    suspend fun clearAllClipboard() = clearClipboardHistory()
 
     // Custom Fonts
     suspend fun saveImportedFont(entity: ImportedFontEntity) = withContext(Dispatchers.IO) {

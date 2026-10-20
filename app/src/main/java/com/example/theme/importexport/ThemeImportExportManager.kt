@@ -37,8 +37,8 @@ data class ImportedThemePreviewResult(
 
 object ThemeImportExportManager {
 
-    private const val MAX_IMPORT_BYTES = 10L * 1024L * 1024L // 10 MB max package size
-    private const val MAX_ASSET_BYTES = 4L * 1024L * 1024L   // 4 MB max embedded asset
+    private const val MAX_IMPORT_BYTES = 64L * 1024L * 1024L // 64 MB max package size
+    private const val MAX_ASSET_BYTES = 32L * 1024L * 1024L   // 32 MB max embedded asset
 
     private val moshi: Moshi = Moshi.Builder()
         .addLast(KotlinJsonAdapterFactory())

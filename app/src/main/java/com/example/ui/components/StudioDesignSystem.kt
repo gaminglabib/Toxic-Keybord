@@ -597,6 +597,9 @@ fun LiveKeyboardPreviewCard(
                                     val next = if (previewState.mode == KeyboardMode.EMOJI_PANEL) KeyboardMode.ALPHABET else KeyboardMode.EMOJI_PANEL
                                     previewState = previewState.onModeChanged(next)
                                 }
+                                KeyActionType.VOICE_TYPING -> {
+                                    onSandboxTextChange?.invoke("$sandboxText🎙️ ")
+                                }
                             }
                         }
 

@@ -98,7 +98,12 @@ data class KeyboardEngineState(
     val shiftState: ShiftState = ShiftState.UNSHIFTED,
     val editorContext: EditorFieldContext = EditorFieldContext(),
     val composingWord: String = "",
-    val suggestions: List<String> = listOf("the", "and", "you")
+    val suggestions: List<String> = listOf("the", "and", "you"),
+    val isPhoneticMode: Boolean = true,
+    val voiceState: com.example.keyboard.voice.VoiceInputState = com.example.keyboard.voice.VoiceInputState.IDLE,
+    val voiceMessage: String = "",
+    val voiceRms: Float = 0f,
+    val selectedEmojiCategoryIndex: Int = 0
 ) {
     val isShifted: Boolean
         get() = shiftState == ShiftState.SHIFTED_SINGLE || shiftState == ShiftState.CAPS_LOCK

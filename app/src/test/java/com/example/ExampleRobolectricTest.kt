@@ -166,4 +166,43 @@ class ExampleRobolectricTest {
         val repo2 = ThemeRepository.getInstance(context)
         assertTrue("ThemeRepository.getInstance must return shared singleton", repo1 === repo2)
     }
+
+    @Test
+    fun banglaPhoneticEngine_transliteratesAvroPhrasesAndWordsCorrectly() {
+        // High-frequency words
+        assertEquals("আমি", com.example.keyboard.phonetic.BanglaPhoneticEngine.transliterateWord("ami").first())
+        assertEquals("বাংলা", com.example.keyboard.phonetic.BanglaPhoneticEngine.transliterateWord("bangla").first())
+        assertEquals("কেমন", com.example.keyboard.phonetic.BanglaPhoneticEngine.transliterateWord("kemon").first())
+        assertEquals("ধন্যবাদ", com.example.keyboard.phonetic.BanglaPhoneticEngine.transliterateWord("dhonnobad").first())
+        assertEquals("সোনার", com.example.keyboard.phonetic.BanglaPhoneticEngine.transliterateWord("shonar").first())
+
+        // Transliterate phrase
+        val phrase = com.example.keyboard.phonetic.BanglaPhoneticEngine.transliteratePhrase("ami bangla bhalobashi")
+        assertTrue(phrase.contains("আমি"))
+        assertTrue(phrase.contains("বাংলা"))
+        assertTrue(phrase.contains("ভালোবাসি"))
+    }
+
+    @Test
+    fun fontManager_validatesFontHeadersCorrectly() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val tempTtf = java.io.File(context.cacheDir, "sample_test.ttf").apply {
+            writeBytes(byteArrayOf(0x00, 0x01, 0x00, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        }
+        assertTrue("TrueType header must validate", com.example.fonts.FontManager.isValidFontHeader(tempTtf))
+
+        val tempOtf = java.io.File(context.cacheDir, "sample_test.otf").apply {
+            writeBytes(byteArrayOf('O'.code.toByte(), 'T'.code.toByte(), 'T'.code.toByte(), 'O'.code.toByte(), 0, 0, 0, 0, 0, 0, 0, 0))
+        }
+        assertTrue("OpenType header must validate", com.example.fonts.FontManager.isValidFontHeader(tempOtf))
+
+        val invalidFile = java.io.File(context.cacheDir, "sample_test.bad").apply {
+            writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12))
+        }
+        assertFalse("Random bytes must not validate as font", com.example.fonts.FontManager.isValidFontHeader(invalidFile))
+
+        tempTtf.delete()
+        tempOtf.delete()
+        invalidFile.delete()
+    }
 }
